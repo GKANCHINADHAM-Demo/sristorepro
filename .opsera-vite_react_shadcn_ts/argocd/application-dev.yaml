@@ -13,7 +13,7 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/GITHUB_ORG/GITHUB_REPO.git
+    repoURL: https://github.com/GKANCHINADHAM-Demo/sristorepro.git
     targetRevision: main
     path: .opsera-vite_react_shadcn_ts/k8s/overlays/dev
 
