@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '.opsera-*/**'
+      - '**.md'
   workflow_dispatch:
     inputs:
       environment:
