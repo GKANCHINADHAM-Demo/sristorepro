@@ -1,0 +1,111 @@
+name: 99 - Fix ArgoCD Sync Issue
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  ENVIRONMENT: dev
+  AWS_REGION: us-west-2
+  TENANT: gayathrikanchinadham
+
+jobs:
+  fix-sync:
+    name: Force ArgoCD Resync
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Discover and configure kubectl
+        id: kubectl-setup
+        run: |
+          echo "🔍 Discovering EKS clusters..."
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+
+          REGION_SHORT=$(echo "${{ env.AWS_REGION }}" | sed 's/us-west-2/usw2/')
+          CLUSTER_PATTERN="${{ env.TENANT }}-${REGION_SHORT}"
+
+          FOUND_CLUSTER=""
+          for cluster in $ALL_CLUSTERS; do
+            if [[ "$cluster" == *"$CLUSTER_PATTERN"* ]]; then
+              FOUND_CLUSTER="$cluster"
+              break
+            fi
+          done
+
+          if [ -z "$FOUND_CLUSTER" ]; then
+            FOUND_CLUSTER=$(echo "$ALL_CLUSTERS" | awk '{print $1}')
+          fi
+
+          echo "Configuring kubectl for: $FOUND_CLUSTER"
+          aws eks update-kubeconfig --name $FOUND_CLUSTER --region ${{ env.AWS_REGION }}
+          echo "✓ kubectl configured"
+
+      - name: Delete and recreate ArgoCD application
+        run: |
+          APP_NAME="vite-react-shadcn-ts-dev"
+
+          echo "🗑️ Deleting existing ArgoCD application..."
+          kubectl delete application $APP_NAME -n argocd --wait=false || echo "Application may not exist"
+
+          echo "⏳ Waiting 10 seconds for cleanup..."
+          sleep 10
+
+          echo "✨ Creating fresh ArgoCD application..."
+          kubectl apply -f .opsera-vite_react_shadcn_ts/argocd/application-dev.yaml
+
+          echo "✓ ArgoCD application recreated"
+
+          echo "⏳ Waiting for initial sync (30 seconds)..."
+          sleep 30
+
+          echo "📊 New application status:"
+          kubectl get application $APP_NAME -n argocd
+
+          echo ""
+          echo "Current revision:"
+          kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.revision}'
+          echo ""
+
+          echo ""
+          echo "Expected revision (HEAD):"
+          git rev-parse HEAD
+
+      - name: Verify ingress created
+        run: |
+          echo "🔍 Checking if ingress was created..."
+          sleep 20
+
+          if kubectl get ingress vite-react-shadcn-ts -n vite-react-shadcn-ts-dev 2>/dev/null; then
+            echo "✅ Ingress EXISTS!"
+            kubectl get ingress vite-react-shadcn-ts -n vite-react-shadcn-ts-dev
+          else
+            echo "❌ Ingress still not found"
+            echo ""
+            echo "ArgoCD application status:"
+            kubectl describe application vite-react-shadcn-ts-dev -n argocd | tail -50
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Fix ArgoCD Sync - Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Deleted old ArgoCD application" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Created fresh ArgoCD application" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Application will sync to latest commit" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Wait 1-2 minutes, then test:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "curl https://vite-react-shadcn-ts-dev.agents.opsera.dev/health" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
