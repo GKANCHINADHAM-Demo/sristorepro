@@ -78,17 +78,39 @@ jobs:
           echo "✓ Created VPC: $VPC_ID"
           echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
 
-      - name: Check for existing EKS cluster
+      - name: Discover existing EKS cluster
         id: check-eks
         run: |
-          CLUSTER_NAME="${{ env.TENANT }}-usw2-np"
+          ENV_TYPE="np"  # non-prod by default (dev/qa/staging)
+          if [ "${{ inputs.environment }}" = "prod" ]; then
+            ENV_TYPE="prod"
+          fi
 
-          if aws eks describe-cluster --name $CLUSTER_NAME --region ${{ inputs.region }} 2>/dev/null; then
+          # Pattern: {tenant}-{region-short}-{env-type}
+          REGION_SHORT=$(echo "${{ inputs.region }}" | sed 's/us-west-2/usw2/;s/us-east-1/use1/;s/eu-west-1/euw1/')
+          CLUSTER_PATTERN="${{ env.TENANT }}-${REGION_SHORT}-${ENV_TYPE}"
+
+          echo "Searching for EKS cluster matching: $CLUSTER_PATTERN"
+
+          # List all clusters and find matching one
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ inputs.region }} --query 'clusters[]' --output text)
+
+          FOUND_CLUSTER=""
+          for cluster in $ALL_CLUSTERS; do
+            if [[ "$cluster" == "$CLUSTER_PATTERN" ]]; then
+              FOUND_CLUSTER="$cluster"
+              break
+            fi
+          done
+
+          if [ -n "$FOUND_CLUSTER" ]; then
             echo "cluster_exists=true" >> $GITHUB_OUTPUT
-            echo "✓ Found existing EKS cluster: $CLUSTER_NAME"
+            echo "cluster_name=$FOUND_CLUSTER" >> $GITHUB_OUTPUT
+            echo "✓ Found existing EKS cluster: $FOUND_CLUSTER"
           else
             echo "cluster_exists=false" >> $GITHUB_OUTPUT
-            echo "⚠ EKS cluster not found: $CLUSTER_NAME"
+            echo "cluster_name=$CLUSTER_PATTERN" >> $GITHUB_OUTPUT
+            echo "⚠ No EKS cluster found matching pattern: $CLUSTER_PATTERN"
           fi
 
       - name: Check for existing ECR repository
@@ -129,7 +151,7 @@ jobs:
           echo "| Resource | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|--------|---------|" >> $GITHUB_STEP_SUMMARY
           echo "| VPC | ${{ steps.check-vpc.outputs.vpc_exists == 'true' && '✓ Existing' || '✓ Created' }} | ${{ steps.check-vpc.outputs.vpc_id }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| EKS Cluster | ${{ steps.check-eks.outputs.cluster_exists == 'true' && '✓ Existing' || '⚠ Manual setup required' }} | ${{ env.TENANT }}-usw2-np |" >> $GITHUB_STEP_SUMMARY
+          echo "| EKS Cluster | ${{ steps.check-eks.outputs.cluster_exists == 'true' && '✓ Existing' || '⚠ Manual setup required' }} | ${{ steps.check-eks.outputs.cluster_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ECR Repository | ${{ steps.check-ecr.outputs.repo_exists == 'true' && '✓ Existing' || '✓ Created' }} | ${{ steps.check-ecr.outputs.repo_uri }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
