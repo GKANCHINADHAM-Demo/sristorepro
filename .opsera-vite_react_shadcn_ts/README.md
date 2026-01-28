@@ -100,7 +100,7 @@ Dockerfile                             # Multi-stage production build
 | **Strategy** | Direct Deploy |
 | **Traffic** | 0% → 100% instant |
 | **Replicas** | 1 |
-| **URL** | https://vite-react-shadcn-ts-dev.agents.opsera.dev |
+| **URL** | https://vite-react-shadcn-ts-dev.agent.opsera.dev |
 | **Auto-sync** | Yes (ArgoCD) |
 | **Rollback** | Manual (via ArgoCD) |
 

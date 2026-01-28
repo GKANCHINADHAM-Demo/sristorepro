@@ -23,7 +23,7 @@ jobs:
       id-token: write
     environment:
       name: dev
-      url: https://${{ env.APP_NAME }}-dev.agents.opsera.dev
+      url: https://${{ env.APP_NAME }}-dev.agent.opsera.dev
 
     steps:
       - name: Checkout code
@@ -108,10 +108,10 @@ jobs:
               patch: |-
                 - op: replace
                   path: /spec/tls/0/hosts/0
-                  value: ${{ env.APP_NAME }}-dev.agents.opsera.dev
+                  value: ${{ env.APP_NAME }}-dev.agent.opsera.dev
                 - op: replace
                   path: /spec/rules/0/host
-                  value: ${{ env.APP_NAME }}-dev.agents.opsera.dev
+                  value: ${{ env.APP_NAME }}-dev.agent.opsera.dev
           EOF
 
           cd ../../../../
@@ -400,7 +400,7 @@ jobs:
           echo "🧪 Testing Endpoint Availability"
           echo "==============================="
 
-          ENDPOINT="https://vite-react-shadcn-ts-dev.agents.opsera.dev"
+          ENDPOINT="https://vite-react-shadcn-ts-dev.agent.opsera.dev"
 
           echo ""
           echo "Endpoint: $ENDPOINT"
@@ -441,9 +441,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 🌐 Application Endpoint" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### **[https://vite-react-shadcn-ts-dev.agents.opsera.dev](https://vite-react-shadcn-ts-dev.agents.opsera.dev)**" >> $GITHUB_STEP_SUMMARY
+          echo "### **[https://vite-react-shadcn-ts-dev.agent.opsera.dev](https://vite-react-shadcn-ts-dev.agent.opsera.dev)**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Health Check: https://vite-react-shadcn-ts-dev.agents.opsera.dev/health" >> $GITHUB_STEP_SUMMARY
+          echo "Health Check: https://vite-react-shadcn-ts-dev.agent.opsera.dev/health" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 📊 Quick Status Check" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

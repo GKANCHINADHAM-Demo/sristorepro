@@ -134,5 +134,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Wait 2-3 minutes for ALB provisioning, then test:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "curl https://vite-react-shadcn-ts-dev.agents.opsera.dev/health" >> $GITHUB_STEP_SUMMARY
+          echo "curl https://vite-react-shadcn-ts-dev.agent.opsera.dev/health" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,66 @@
+name: 99 - Find ACM Certificate
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  find-cert:
+    name: Find Wildcard Certificate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: List ACM certificates
+        run: |
+          echo "=== All ACM Certificates in ${{ env.AWS_REGION }} ==="
+          aws acm list-certificates --region ${{ env.AWS_REGION }} --output table
+
+          echo ""
+          echo "=== Certificates with Domain Names ==="
+          aws acm list-certificates --region ${{ env.AWS_REGION }} \
+            --query 'CertificateSummaryList[*].[DomainName,CertificateArn,Status]' \
+            --output table
+
+          echo ""
+          echo "=== Looking for *.agent.opsera.dev ==="
+          WILDCARD_CERT=$(aws acm list-certificates --region ${{ env.AWS_REGION }} \
+            --query 'CertificateSummaryList[?DomainName==`*.agent.opsera.dev`].CertificateArn' \
+            --output text)
+
+          if [ -n "$WILDCARD_CERT" ]; then
+            echo "✓ Found wildcard certificate:"
+            echo "$WILDCARD_CERT"
+            echo ""
+            echo "Certificate details:"
+            aws acm describe-certificate --certificate-arn "$WILDCARD_CERT" \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Certificate.[DomainName,Status,InUseBy]' \
+              --output table
+          else
+            echo "❌ No wildcard certificate found for *.agent.opsera.dev"
+            echo ""
+            echo "Checking for agent.opsera.dev (without wildcard):"
+            aws acm list-certificates --region ${{ env.AWS_REGION }} \
+              --query 'CertificateSummaryList[?contains(DomainName, `agent.opsera.dev`)].{Domain:DomainName,ARN:CertificateArn}' \
+              --output table
+          fi
+
+      - name: Summary
+        run: |
+          echo "## ACM Certificate Search" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "If wildcard cert found, update ingress.yaml with:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`yaml" >> $GITHUB_STEP_SUMMARY
+          echo "alb.ingress.kubernetes.io/certificate-arn: <CERT_ARN>" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

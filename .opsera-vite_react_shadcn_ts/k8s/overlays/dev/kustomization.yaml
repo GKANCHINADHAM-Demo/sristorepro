@@ -23,7 +23,7 @@ patches:
     patch: |-
       - op: replace
         path: /spec/tls/0/hosts/0
-        value: vite-react-shadcn-ts-dev.agents.opsera.dev
+        value: vite-react-shadcn-ts-dev.agent.opsera.dev
       - op: replace
         path: /spec/rules/0/host
-        value: vite-react-shadcn-ts-dev.agents.opsera.dev
+        value: vite-react-shadcn-ts-dev.agent.opsera.dev
