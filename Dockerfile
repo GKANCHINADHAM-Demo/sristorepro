@@ -7,10 +7,11 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 
 # Install dependencies (including dev dependencies for build)
-RUN npm ci
+# Using npm install instead of npm ci due to lock file sync issues
+RUN npm install
 
 # Copy source code
 COPY . .
