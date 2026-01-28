@@ -161,90 +161,66 @@ jobs:
           echo "cluster_found=true" >> $GITHUB_OUTPUT
           echo "cluster_name=$FOUND_CLUSTER" >> $GITHUB_OUTPUT
 
-      - name: Verify ArgoCD application exists
+      - name: Create or verify ArgoCD application
         if: steps.kubectl-setup.outputs.cluster_found == 'true'
         id: argocd-check
         run: |
-          echo "🔍 Deep Investigation: ArgoCD Application Status"
-          echo "================================================"
+          echo "🔍 ArgoCD Application Setup - Automated"
+          echo "======================================="
           echo ""
           echo "Cluster: ${{ steps.kubectl-setup.outputs.cluster_name }}"
-          echo "Expected Application: vite-react-shadcn-ts-dev"
+          echo "Application: vite-react-shadcn-ts-dev"
           echo ""
 
           APP_NAME="vite-react-shadcn-ts-dev"
 
           # Check if ArgoCD namespace exists
-          echo "## 1. Checking ArgoCD Namespace"
-          if kubectl get namespace argocd 2>/dev/null; then
-            echo "✓ ArgoCD namespace exists"
-          else
+          echo "## 1. Checking ArgoCD Installation"
+          if ! kubectl get namespace argocd 2>/dev/null; then
             echo "✗ ArgoCD namespace NOT found!"
-            echo "ArgoCD may not be installed in this cluster"
+            echo "ArgoCD must be installed in the cluster"
             echo "app_exists=false" >> $GITHUB_OUTPUT
             exit 0
           fi
+          echo "✓ ArgoCD namespace exists"
 
           echo ""
-          echo "## 2. Listing All ArgoCD Applications"
-          kubectl get applications -n argocd -o wide 2>/dev/null || echo "No applications found"
-
-          echo ""
-          echo "## 3. Searching for Our Application: $APP_NAME"
+          echo "## 2. Checking if Application Exists"
           if kubectl get application $APP_NAME -n argocd 2>/dev/null; then
-            echo "✓ ArgoCD application '$APP_NAME' EXISTS"
+            echo "✓ ArgoCD application already exists"
             echo "app_exists=true" >> $GITHUB_OUTPUT
 
             echo ""
-            echo "## 4. Application Full Details (YAML)"
-            kubectl get application $APP_NAME -n argocd -o yaml
-
-            echo ""
-            echo "## 5. Sync Status"
+            echo "Current Status:"
             SYNC_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
-            echo "Sync Status: $SYNC_STATUS"
-
-            echo ""
-            echo "## 6. Health Status"
             HEALTH_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
-            echo "Health Status: $HEALTH_STATUS"
-
-            echo ""
-            echo "## 7. Last Sync Result"
-            kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.operationState}' 2>/dev/null | jq '.' || echo "No sync operation state"
-
-            echo ""
-            echo "## 8. Application Conditions"
-            kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.conditions}' 2>/dev/null | jq '.' || echo "No conditions"
-
-            echo ""
-            echo "## 9. Resources Status"
-            kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.resources}' 2>/dev/null | jq '.' || echo "No resources status"
+            echo "  Sync: $SYNC_STATUS"
+            echo "  Health: $HEALTH_STATUS"
 
           else
-            echo "✗ ArgoCD application '$APP_NAME' NOT FOUND"
-            echo "app_exists=false" >> $GITHUB_OUTPUT
+            echo "✗ ArgoCD application NOT found"
+            echo ""
+            echo "## 3. Creating ArgoCD Application Automatically"
+
+            # Apply the ArgoCD application from the repo
+            kubectl apply -f .opsera-vite_react_shadcn_ts/argocd/application-dev.yaml
+
+            echo "✓ ArgoCD application created successfully!"
+            echo "app_exists=true" >> $GITHUB_OUTPUT
+            echo "app_just_created=true" >> $GITHUB_OUTPUT
 
             echo ""
-            echo "## 4. How to Create the Application"
-            echo ""
-            echo "Run the following command from a machine with kubectl access:"
-            echo ""
-            echo "  kubectl apply -f .opsera-vite_react_shadcn_ts/argocd/application-dev.yaml"
-            echo ""
-            echo "Or apply directly from the repo:"
-            echo ""
-            echo "  kubectl apply -f https://raw.githubusercontent.com/GKANCHINADHAM-Demo/sristorepro/main/.opsera-vite_react_shadcn_ts/argocd/application-dev.yaml"
-            echo ""
+            echo "## 4. Waiting for Initial Registration (10 seconds)"
+            sleep 10
 
             echo ""
-            echo "## 5. ArgoCD Server Status"
-            kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server 2>/dev/null || echo "ArgoCD server pods not found"
-
-            echo ""
-            echo "## 6. Recent ArgoCD Server Logs"
-            kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server --tail=20 2>/dev/null || echo "Could not fetch ArgoCD logs"
+            echo "Application registered:"
+            kubectl get application $APP_NAME -n argocd
           fi
+
+          echo ""
+          echo "## 5. Application Details"
+          kubectl get application $APP_NAME -n argocd -o yaml 2>/dev/null | grep -A 30 "status:" || echo "Status not available yet"
 
       - name: Trigger and monitor ArgoCD sync
         if: steps.kubectl-setup.outputs.cluster_found == 'true' && steps.argocd-check.outputs.app_exists == 'true'
