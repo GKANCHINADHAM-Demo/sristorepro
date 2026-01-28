@@ -1,0 +1,78 @@
+name: 99 - Check ArgoCD Sync and Ingress
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  check:
+    name: Check Sync Status
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Check ArgoCD app status
+        run: |
+          echo "=== ArgoCD Application Status ==="
+          kubectl get application ${{ env.APP_NAME }}-dev -n argocd -o wide
+
+          echo ""
+          echo "=== Current Revision ==="
+          kubectl get application ${{ env.APP_NAME }}-dev -n argocd -o jsonpath='{.status.sync.revision}'
+          echo ""
+
+          echo ""
+          echo "=== Expected Revision (HEAD) ==="
+          echo "09e787b"
+
+      - name: Check ingress resource
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Ingress Spec (TLS section) ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o jsonpath='{.spec.tls}' | jq '.'
+
+          echo ""
+          echo "=== Ingress Annotations ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o jsonpath='{.metadata.annotations}' | jq '.'
+
+          echo ""
+          echo "=== Ingress Full YAML ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o yaml
+
+      - name: Force ArgoCD sync if needed
+        run: |
+          echo "=== Forcing ArgoCD Hard Refresh ==="
+          kubectl patch application ${{ env.APP_NAME }}-dev -n argocd \
+            --type merge \
+            -p '{"operation":{"initiatedBy":{"username":"admin"},"sync":{"revision":"HEAD"}}}'
+
+          echo ""
+          echo "Waiting 30 seconds for sync..."
+          sleep 30
+
+          echo ""
+          echo "=== New ArgoCD Status ==="
+          kubectl get application ${{ env.APP_NAME }}-dev -n argocd -o wide
+
+      - name: Test certificate again
+        run: |
+          echo "=== Testing SSL Certificate After Sync ==="
+          echo | openssl s_client -connect vite-react-shadcn-ts-dev.agent.opsera.dev:443 -servername vite-react-shadcn-ts-dev.agent.opsera.dev 2>/dev/null | openssl x509 -noout -subject -issuer
