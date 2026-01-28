@@ -75,6 +75,10 @@ jobs:
 
           git add .opsera-vite_react_shadcn_ts/k8s/overlays/dev/kustomization.yaml
           git commit -m "Deploy ${{ env.APP_NAME }} to DEV: ${{ inputs.image_tag }}"
+
+          # Pull and rebase before pushing to handle race conditions
+          git pull --rebase origin main || true
+
           git push
 
           echo "✓ Pushed changes to trigger ArgoCD sync"
