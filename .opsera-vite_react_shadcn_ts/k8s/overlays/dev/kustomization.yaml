@@ -10,7 +10,7 @@ resources:
 images:
   - name: APP_IMAGE
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vite-react-shadcn-ts
-    newTag: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vite-react-shadcn-ts:ce27643
+    newTag: ce27643
 
 replicas:
   - name: vite-react-shadcn-ts
@@ -21,6 +21,9 @@ patches:
       kind: Ingress
       name: vite-react-shadcn-ts
     patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: vite-react-shadcn-ts-dev.agent.opsera.dev
       - op: replace
         path: /spec/rules/0/host
         value: vite-react-shadcn-ts-dev.agent.opsera.dev

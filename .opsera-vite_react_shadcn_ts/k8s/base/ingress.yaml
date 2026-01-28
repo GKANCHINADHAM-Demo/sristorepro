@@ -12,6 +12,9 @@ metadata:
     alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:792373136340:certificate/9ca6cec7-6725-45a5-9d2b-19287925070e
 spec:
   ingressClassName: alb
+  tls:
+    - hosts:
+        - HOSTNAME_PLACEHOLDER
   rules:
     - host: HOSTNAME_PLACEHOLDER
       http:
