@@ -1,0 +1,158 @@
+name: 99 - Diagnose and Fix Ingress
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  ENVIRONMENT: dev
+  AWS_REGION: us-west-2
+
+jobs:
+  diagnose:
+    name: Diagnose Ingress Issues
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+
+          if [ -z "$HUB_CLUSTER" ]; then
+            echo "❌ No ArgoCD hub cluster found"
+            exit 1
+          fi
+
+          echo "✓ Found cluster: $HUB_CLUSTER"
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Check ArgoCD sync status
+        run: |
+          echo "=== ArgoCD Application Status ==="
+          kubectl get application ${{ env.APP_NAME }}-dev -n argocd -o wide
+
+      - name: Check namespace and resources
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Namespace ==="
+          kubectl get namespace $APP_NS
+
+          echo ""
+          echo "=== Deployment ==="
+          kubectl get deployment ${{ env.APP_NAME }} -n $APP_NS -o wide
+
+          echo ""
+          echo "=== Pods ==="
+          kubectl get pods -n $APP_NS -o wide
+
+          echo ""
+          echo "=== Service ==="
+          kubectl get service ${{ env.APP_NAME }} -n $APP_NS -o wide
+
+          echo ""
+          echo "=== Ingress ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o wide
+
+      - name: Check ingress details
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Ingress Full Details ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o yaml
+
+      - name: Check AWS Load Balancer Controller
+        run: |
+          echo "=== AWS LB Controller Deployment ==="
+          kubectl get deployment -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller 2>/dev/null || echo "Not found in kube-system"
+
+          echo ""
+          echo "=== Checking other namespaces ==="
+          kubectl get deployment -A -l app.kubernetes.io/name=aws-load-balancer-controller 2>/dev/null || echo "Not found anywhere"
+
+          echo ""
+          echo "=== All ingress controllers ==="
+          kubectl get deployment -A | grep -i ingress || echo "No ingress controllers found"
+
+      - name: Check IngressClass
+        run: |
+          echo "=== Available IngressClasses ==="
+          kubectl get ingressclass
+
+          echo ""
+          echo "=== IngressClass Details ==="
+          kubectl get ingressclass -o yaml
+
+      - name: Check for ALB in AWS
+        run: |
+          echo "=== AWS Application Load Balancers ==="
+          aws elbv2 describe-load-balancers \
+            --region ${{ env.AWS_REGION }} \
+            --query 'LoadBalancers[*].[LoadBalancerName,DNSName,State.Code,Type,Scheme]' \
+            --output table
+
+      - name: Check ingress events
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Recent Events in Namespace ==="
+          kubectl get events -n $APP_NS --sort-by='.lastTimestamp' | tail -30
+
+      - name: Check old pods with bad images
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Checking for pods with InvalidImageName ==="
+          kubectl get pods -n $APP_NS -o json | \
+            jq -r '.items[] | select(.status.containerStatuses[]?.state.waiting?.reason == "InvalidImageName") | .metadata.name' || echo "No invalid image pods found"
+
+          echo ""
+          echo "=== All pod statuses ==="
+          kubectl get pods -n $APP_NS -o json | jq -r '.items[] | "\(.metadata.name): \(.status.phase) - \(.status.containerStatuses[]?.state | keys[0])"'
+
+      - name: Delete old invalid pods
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "🗑️ Deleting pods with InvalidImageName..."
+          INVALID_PODS=$(kubectl get pods -n $APP_NS -o json | \
+            jq -r '.items[] | select(.status.containerStatuses[]?.state.waiting?.reason == "InvalidImageName") | .metadata.name')
+
+          if [ -z "$INVALID_PODS" ]; then
+            echo "No invalid pods to delete"
+          else
+            echo "$INVALID_PODS" | while read pod; do
+              echo "Deleting: $pod"
+              kubectl delete pod $pod -n $APP_NS
+            done
+          fi
+
+      - name: Test endpoint from cluster
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Testing Service Endpoint from Inside Cluster ==="
+          kubectl run curl-test --image=curlimages/curl:latest --rm -i --restart=Never -n $APP_NS -- \
+            curl -s -o /dev/null -w "Status: %{http_code}\n" \
+            http://${{ env.APP_NAME }}.$APP_NS.svc.cluster.local/health || echo "Service test failed"
+
+      - name: Summary and recommendations
+        run: |
+          echo "## Diagnostics Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Check the logs above for:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Is the Ingress showing an ADDRESS?" >> $GITHUB_STEP_SUMMARY
+          echo "2. Is AWS Load Balancer Controller running?" >> $GITHUB_STEP_SUMMARY
+          echo "3. Is IngressClass 'alb' available?" >> $GITHUB_STEP_SUMMARY
+          echo "4. Are there any ALBs created in AWS?" >> $GITHUB_STEP_SUMMARY
+          echo "5. Are pods running with correct image?" >> $GITHUB_STEP_SUMMARY
