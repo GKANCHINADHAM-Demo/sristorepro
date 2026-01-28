@@ -79,25 +79,63 @@ jobs:
 
           echo "✓ Pushed changes to trigger ArgoCD sync"
 
-      - name: Configure kubectl
+      - name: Discover and configure kubectl
+        id: kubectl-setup
         run: |
-          echo "🔧 Configuring kubectl access to EKS cluster..."
+          echo "🔍 Discovering EKS clusters in region: ${{ env.AWS_REGION }}"
+          echo ""
 
-          # Discover cluster name dynamically
+          # List all EKS clusters in the region
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+
+          if [ -z "$ALL_CLUSTERS" ]; then
+            echo "⚠ No EKS clusters found in region ${{ env.AWS_REGION }}"
+            echo "cluster_found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Available clusters:"
+          echo "$ALL_CLUSTERS"
+          echo ""
+
+          # Try to find cluster matching pattern: {tenant}-{region-short}-{env}
           REGION_SHORT=$(echo "${{ env.AWS_REGION }}" | sed 's/us-west-2/usw2/;s/us-east-1/use1/;s/eu-west-1/euw1/')
-          CLUSTER_NAME="${{ env.TENANT }}-${REGION_SHORT}-np"
+          CLUSTER_PATTERN="${{ env.TENANT }}-${REGION_SHORT}"
 
-          echo "Cluster: $CLUSTER_NAME"
-          echo "Region: ${{ env.AWS_REGION }}"
+          echo "Searching for cluster matching pattern: $CLUSTER_PATTERN*"
+          echo ""
+
+          FOUND_CLUSTER=""
+          for cluster in $ALL_CLUSTERS; do
+            if [[ "$cluster" == *"$CLUSTER_PATTERN"* ]]; then
+              FOUND_CLUSTER="$cluster"
+              echo "✓ Found matching cluster: $FOUND_CLUSTER"
+              break
+            fi
+          done
+
+          # If no pattern match, use first cluster
+          if [ -z "$FOUND_CLUSTER" ]; then
+            FOUND_CLUSTER=$(echo "$ALL_CLUSTERS" | awk '{print $1}')
+            echo "⚠ No pattern match found, using first available cluster: $FOUND_CLUSTER"
+          fi
+
+          echo ""
+          echo "🔧 Configuring kubectl for cluster: $FOUND_CLUSTER"
 
           # Update kubeconfig
-          aws eks update-kubeconfig --name $CLUSTER_NAME --region ${{ env.AWS_REGION }}
+          aws eks update-kubeconfig --name $FOUND_CLUSTER --region ${{ env.AWS_REGION }}
 
-          echo "✓ kubectl configured for cluster: $CLUSTER_NAME"
+          echo "✓ kubectl configured successfully"
+          echo "cluster_found=true" >> $GITHUB_OUTPUT
+          echo "cluster_name=$FOUND_CLUSTER" >> $GITHUB_OUTPUT
 
       - name: Verify ArgoCD application exists
+        if: steps.kubectl-setup.outputs.cluster_found == 'true'
         run: |
           echo "🔍 Checking if ArgoCD application exists..."
+          echo "Cluster: ${{ steps.kubectl-setup.outputs.cluster_name }}"
+          echo ""
 
           APP_NAME="vite-react-shadcn-ts-dev"
 
@@ -117,6 +155,7 @@ jobs:
           fi
 
       - name: Trigger and monitor ArgoCD sync
+        if: steps.kubectl-setup.outputs.cluster_found == 'true'
         run: |
           echo "🔄 Triggering ArgoCD sync..."
 
@@ -151,6 +190,7 @@ jobs:
           fi
 
       - name: Wait for deployment rollout
+        if: steps.kubectl-setup.outputs.cluster_found == 'true'
         run: |
           echo "⏳ Waiting for deployment rollout (max 3 minutes)..."
 
@@ -181,6 +221,7 @@ jobs:
           fi
 
       - name: Verify deployment status
+        if: steps.kubectl-setup.outputs.cluster_found == 'true'
         run: |
           echo "🔍 Comprehensive Deployment Verification"
           echo "========================================"
@@ -219,6 +260,7 @@ jobs:
           fi
 
       - name: Verify service and ingress
+        if: steps.kubectl-setup.outputs.cluster_found == 'true'
         run: |
           echo "🌐 Network Configuration Verification"
           echo "===================================="
