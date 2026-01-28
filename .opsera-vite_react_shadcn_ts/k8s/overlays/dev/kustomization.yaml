@@ -5,12 +5,29 @@ namespace: vite-react-shadcn-ts-dev
 
 resources:
   - ../../base
+  - namespace.yaml
 
 images:
   - name: APP_IMAGE
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vite-react-shadcn-ts
-    newTag: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vite-react-shadcn-ts:b87c245
+    newTag: 4d08e8d
 
 replicas:
   - name: vite-react-shadcn-ts
     count: 1
+
+patches:
+  - target:
+      kind: Ingress
+      name: vite-react-shadcn-ts
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: vite-react-shadcn-ts-dev.agents.opsera.dev
+      - op: replace
+        path: /spec/rules/0/host
+        value: vite-react-shadcn-ts-dev.agents.opsera.dev
+
+commonLabels:
+  environment: dev
+  tenant: gayathrikanchinadham
