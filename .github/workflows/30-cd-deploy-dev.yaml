@@ -163,62 +163,146 @@ jobs:
 
       - name: Verify ArgoCD application exists
         if: steps.kubectl-setup.outputs.cluster_found == 'true'
+        id: argocd-check
         run: |
-          echo "🔍 Checking if ArgoCD application exists..."
+          echo "🔍 Deep Investigation: ArgoCD Application Status"
+          echo "================================================"
+          echo ""
           echo "Cluster: ${{ steps.kubectl-setup.outputs.cluster_name }}"
+          echo "Expected Application: vite-react-shadcn-ts-dev"
           echo ""
 
           APP_NAME="vite-react-shadcn-ts-dev"
 
+          # Check if ArgoCD namespace exists
+          echo "## 1. Checking ArgoCD Namespace"
+          if kubectl get namespace argocd 2>/dev/null; then
+            echo "✓ ArgoCD namespace exists"
+          else
+            echo "✗ ArgoCD namespace NOT found!"
+            echo "ArgoCD may not be installed in this cluster"
+            echo "app_exists=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo ""
+          echo "## 2. Listing All ArgoCD Applications"
+          kubectl get applications -n argocd -o wide 2>/dev/null || echo "No applications found"
+
+          echo ""
+          echo "## 3. Searching for Our Application: $APP_NAME"
           if kubectl get application $APP_NAME -n argocd 2>/dev/null; then
-            echo "✓ ArgoCD application '$APP_NAME' exists"
+            echo "✓ ArgoCD application '$APP_NAME' EXISTS"
+            echo "app_exists=true" >> $GITHUB_OUTPUT
 
             echo ""
-            echo "📊 Application Details:"
-            kubectl get application $APP_NAME -n argocd -o yaml | grep -A 5 "status:" || true
+            echo "## 4. Application Full Details (YAML)"
+            kubectl get application $APP_NAME -n argocd -o yaml
+
+            echo ""
+            echo "## 5. Sync Status"
+            SYNC_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            echo "Sync Status: $SYNC_STATUS"
+
+            echo ""
+            echo "## 6. Health Status"
+            HEALTH_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            echo "Health Status: $HEALTH_STATUS"
+
+            echo ""
+            echo "## 7. Last Sync Result"
+            kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.operationState}' 2>/dev/null | jq '.' || echo "No sync operation state"
+
+            echo ""
+            echo "## 8. Application Conditions"
+            kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.conditions}' 2>/dev/null | jq '.' || echo "No conditions"
+
+            echo ""
+            echo "## 9. Resources Status"
+            kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.resources}' 2>/dev/null | jq '.' || echo "No resources status"
 
           else
-            echo "⚠ ArgoCD application '$APP_NAME' NOT found!"
-            echo "Please apply: kubectl apply -f .opsera-vite_react_shadcn_ts/argocd/application-dev.yaml"
+            echo "✗ ArgoCD application '$APP_NAME' NOT FOUND"
+            echo "app_exists=false" >> $GITHUB_OUTPUT
+
             echo ""
-            echo "Available applications:"
-            kubectl get applications -n argocd || echo "No applications found"
+            echo "## 4. How to Create the Application"
+            echo ""
+            echo "Run the following command from a machine with kubectl access:"
+            echo ""
+            echo "  kubectl apply -f .opsera-vite_react_shadcn_ts/argocd/application-dev.yaml"
+            echo ""
+            echo "Or apply directly from the repo:"
+            echo ""
+            echo "  kubectl apply -f https://raw.githubusercontent.com/GKANCHINADHAM-Demo/sristorepro/main/.opsera-vite_react_shadcn_ts/argocd/application-dev.yaml"
+            echo ""
+
+            echo ""
+            echo "## 5. ArgoCD Server Status"
+            kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server 2>/dev/null || echo "ArgoCD server pods not found"
+
+            echo ""
+            echo "## 6. Recent ArgoCD Server Logs"
+            kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server --tail=20 2>/dev/null || echo "Could not fetch ArgoCD logs"
           fi
 
       - name: Trigger and monitor ArgoCD sync
-        if: steps.kubectl-setup.outputs.cluster_found == 'true'
+        if: steps.kubectl-setup.outputs.cluster_found == 'true' && steps.argocd-check.outputs.app_exists == 'true'
         run: |
-          echo "🔄 Triggering ArgoCD sync..."
+          echo "🔄 Deep Logging: ArgoCD Sync Process"
+          echo "===================================="
 
           APP_NAME="vite-react-shadcn-ts-dev"
 
-          # Check if app exists first
-          if kubectl get application $APP_NAME -n argocd 2>/dev/null; then
+          echo ""
+          echo "## 1. Pre-Sync Status"
+          echo "Current Sync Status:"
+          kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}' && echo ""
+          echo "Current Health Status:"
+          kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.health.status}' && echo ""
+          echo "Current Revision:"
+          kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.revision}' && echo ""
 
-            # Trigger refresh/sync
-            echo "Refreshing application..."
-            kubectl patch application $APP_NAME -n argocd --type merge -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' || true
+          echo ""
+          echo "## 2. Triggering Hard Refresh"
+          kubectl patch application $APP_NAME -n argocd --type merge -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' 2>&1 || echo "Refresh annotation failed (may already be syncing)"
 
+          echo ""
+          echo "## 3. Monitoring Sync Progress (30 seconds)"
+          for i in {1..6}; do
             echo ""
-            echo "⏳ Waiting for sync to start (10 seconds)..."
-            sleep 10
+            echo "--- Check $i/6 (${i}0 seconds) ---"
 
-            # Check sync status
-            echo ""
-            echo "📊 Sync Status:"
-            kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}' && echo ""
+            SYNC_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            HEALTH_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            OPERATION_PHASE=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "None")
 
-            echo ""
-            echo "🏥 Health Status:"
-            kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.health.status}' && echo ""
+            echo "Sync: $SYNC_STATUS | Health: $HEALTH_STATUS | Operation: $OPERATION_PHASE"
 
-            echo ""
-            echo "📝 Sync Summary:"
-            kubectl describe application $APP_NAME -n argocd | grep -A 10 "Status:" || true
+            # Show any sync errors
+            SYNC_ERROR=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.operationState.message}' 2>/dev/null || echo "")
+            if [ -n "$SYNC_ERROR" ]; then
+              echo "Message: $SYNC_ERROR"
+            fi
 
-          else
-            echo "⚠ Skipping - ArgoCD application not found"
-          fi
+            sleep 5
+          done
+
+          echo ""
+          echo "## 4. Final Sync Status"
+          kubectl describe application $APP_NAME -n argocd | grep -A 20 "Status:" || true
+
+          echo ""
+          echo "## 5. Application Events"
+          kubectl get events -n argocd --field-selector involvedObject.name=$APP_NAME --sort-by='.lastTimestamp' 2>/dev/null || echo "No events found"
+
+          echo ""
+          echo "## 6. Recent ArgoCD Application Controller Logs"
+          kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=30 2>/dev/null | grep -i "$APP_NAME" || echo "No relevant logs"
+
+          echo ""
+          echo "## 7. Sync Operation Details"
+          kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.operationState}' 2>/dev/null | jq '.' || echo "No operation state"
 
       - name: Wait for deployment rollout
         if: steps.kubectl-setup.outputs.cluster_found == 'true'
