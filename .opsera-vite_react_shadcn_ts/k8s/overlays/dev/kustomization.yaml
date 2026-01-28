@@ -9,7 +9,7 @@ resources:
 images:
   - name: APP_IMAGE
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vite-react-shadcn-ts
-    newTag: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vite-react-shadcn-ts:1967df2
+    newTag: 4d08e8d
 
 replicas:
   - name: vite-react-shadcn-ts
