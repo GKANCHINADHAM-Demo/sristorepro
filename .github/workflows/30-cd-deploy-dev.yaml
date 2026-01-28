@@ -18,6 +18,9 @@ jobs:
   deploy:
     name: Deploy to DEV
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     environment:
       name: dev
       url: https://${{ env.APP_NAME }}-dev.agents.opsera.dev
@@ -25,6 +28,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || github.token }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
