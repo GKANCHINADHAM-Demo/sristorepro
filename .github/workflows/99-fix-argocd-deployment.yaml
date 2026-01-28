@@ -1,0 +1,138 @@
+name: 99 - Fix ArgoCD Deployment Issue
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  ENVIRONMENT: dev
+  AWS_REGION: us-west-2
+  TENANT: gayathrikanchinadham
+
+jobs:
+  fix-deployment:
+    name: Fix Deployment and Force Sync
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || github.token }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl for hub cluster
+        run: |
+          echo "🔍 Discovering EKS clusters..."
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+
+          # Look for ArgoCD hub cluster
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+
+          if [ -z "$HUB_CLUSTER" ]; then
+            echo "❌ No ArgoCD hub cluster found"
+            exit 1
+          fi
+
+          echo "✓ Found hub cluster: $HUB_CLUSTER"
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Delete existing deployment
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "🗑️ Deleting existing deployment to fix immutable selector..."
+          kubectl delete deployment ${{ env.APP_NAME }} -n $APP_NS --ignore-not-found=true
+
+          echo "⏳ Waiting for deletion to complete..."
+          sleep 10
+
+          echo "✓ Deployment deleted"
+
+      - name: Delete and recreate ArgoCD application
+        run: |
+          APP_NAME="${{ env.APP_NAME }}-dev"
+
+          echo "🗑️ Deleting existing ArgoCD application..."
+          kubectl delete application $APP_NAME -n argocd --wait=false --ignore-not-found=true
+
+          echo "⏳ Waiting for cleanup..."
+          sleep 15
+
+          echo "✨ Creating fresh ArgoCD application..."
+          kubectl apply -f .opsera-vite_react_shadcn_ts/argocd/application-dev.yaml
+
+          echo "✓ ArgoCD application recreated"
+
+      - name: Monitor ArgoCD sync
+        run: |
+          APP_NAME="${{ env.APP_NAME }}-dev"
+
+          echo "⏳ Waiting for ArgoCD to sync (60 seconds)..."
+          sleep 60
+
+          echo "📊 Application status:"
+          kubectl get application $APP_NAME -n argocd -o wide
+
+          echo ""
+          echo "Current revision:"
+          kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.revision}'
+          echo ""
+
+          echo ""
+          echo "Sync status:"
+          kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}'
+          echo ""
+
+          echo ""
+          echo "Health status:"
+          kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.health.status}'
+          echo ""
+
+      - name: Verify resources
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "🔍 Checking deployed resources..."
+          echo ""
+
+          echo "Deployment:"
+          kubectl get deployment ${{ env.APP_NAME }} -n $APP_NS 2>/dev/null || echo "❌ Deployment not found"
+
+          echo ""
+          echo "Pods:"
+          kubectl get pods -n $APP_NS
+
+          echo ""
+          echo "Service:"
+          kubectl get service ${{ env.APP_NAME }} -n $APP_NS 2>/dev/null || echo "❌ Service not found"
+
+          echo ""
+          echo "Ingress:"
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS 2>/dev/null || echo "❌ Ingress not found"
+
+      - name: Summary
+        run: |
+          echo "## Fix ArgoCD Deployment - Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Changes Applied:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Deleted old deployment (fixes immutable selector)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Changed ingress from nginx to alb IngressClass" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Removed commonLabels from kustomization" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Recreated ArgoCD application" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Expected Result:" >> $GITHUB_STEP_SUMMARY
+          echo "ArgoCD should now sync successfully and create all resources including the ALB ingress." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Wait 2-3 minutes for ALB provisioning, then test:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "curl https://vite-react-shadcn-ts-dev.agents.opsera.dev/health" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

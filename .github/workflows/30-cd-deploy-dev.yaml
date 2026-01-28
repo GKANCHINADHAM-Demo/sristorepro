@@ -112,10 +112,6 @@ jobs:
                 - op: replace
                   path: /spec/rules/0/host
                   value: ${{ env.APP_NAME }}-dev.agents.opsera.dev
-
-          commonLabels:
-            environment: dev
-            tenant: ${{ env.TENANT }}
           EOF
 
           cd ../../../../

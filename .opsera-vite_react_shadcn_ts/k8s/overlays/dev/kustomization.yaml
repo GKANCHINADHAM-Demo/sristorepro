@@ -10,7 +10,7 @@ resources:
 images:
   - name: APP_IMAGE
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vite-react-shadcn-ts
-    newTag: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vite-react-shadcn-ts:b405e61
+    newTag: b405e61
 
 replicas:
   - name: vite-react-shadcn-ts
@@ -27,7 +27,3 @@ patches:
       - op: replace
         path: /spec/rules/0/host
         value: vite-react-shadcn-ts-dev.agents.opsera.dev
-
-commonLabels:
-  environment: dev
-  tenant: gayathrikanchinadham
