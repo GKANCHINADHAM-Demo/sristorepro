@@ -1,0 +1,89 @@
+name: 99 - Diagnose Certificate Issue
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  diagnose:
+    name: Diagnose Certificate and DNS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Check ingress and ALB
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Ingress Status ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o yaml | grep -A 20 "annotations:"
+
+          echo ""
+          echo "=== Ingress Address ==="
+          ALB_DNS=$(kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "ALB DNS: $ALB_DNS"
+
+          echo ""
+          echo "=== Get ALB ARN from DNS ==="
+          ALB_NAME=$(echo $ALB_DNS | cut -d'-' -f1-3)
+          echo "ALB Name pattern: $ALB_NAME"
+
+          ALB_ARN=$(aws elbv2 describe-load-balancers \
+            --region ${{ env.AWS_REGION }} \
+            --query "LoadBalancers[?contains(DNSName, '$ALB_NAME')].LoadBalancerArn" \
+            --output text)
+
+          echo "ALB ARN: $ALB_ARN"
+
+          if [ -n "$ALB_ARN" ]; then
+            echo ""
+            echo "=== ALB Listeners ==="
+            aws elbv2 describe-listeners \
+              --load-balancer-arn "$ALB_ARN" \
+              --region ${{ env.AWS_REGION }} \
+              --output table
+
+            echo ""
+            echo "=== HTTPS Listener Details ==="
+            aws elbv2 describe-listeners \
+              --load-balancer-arn "$ALB_ARN" \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Listeners[?Port==`443`].[Certificates,SslPolicy]' \
+              --output json
+          fi
+
+      - name: Test HTTP endpoint
+        run: |
+          echo "=== Testing HTTP (port 80) ==="
+          curl -v -m 10 http://vite-react-shadcn-ts-dev.agent.opsera.dev/health || echo "HTTP failed"
+
+      - name: Check DNS resolution
+        run: |
+          echo "=== DNS Resolution ==="
+          nslookup vite-react-shadcn-ts-dev.agent.opsera.dev || echo "DNS lookup failed"
+
+          echo ""
+          echo "=== Dig output ==="
+          dig vite-react-shadcn-ts-dev.agent.opsera.dev || echo "Dig failed"
+
+      - name: Check certificate
+        run: |
+          echo "=== Testing SSL Certificate ==="
+          echo | openssl s_client -connect vite-react-shadcn-ts-dev.agent.opsera.dev:443 -servername vite-react-shadcn-ts-dev.agent.opsera.dev 2>/dev/null | openssl x509 -noout -text | grep -A 5 "Subject:" || echo "SSL connection failed"
