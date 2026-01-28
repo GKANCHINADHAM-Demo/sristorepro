@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vite-react-shadcn-ts
+  labels:
+    app: vite-react-shadcn-ts
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/tls-acme: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - HOSTNAME_PLACEHOLDER
+      secretName: vite-react-shadcn-ts-tls
+  rules:
+    - host: HOSTNAME_PLACEHOLDER
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vite-react-shadcn-ts
+                port:
+                  number: 80

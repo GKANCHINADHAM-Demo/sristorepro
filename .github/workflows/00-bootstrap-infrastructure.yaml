@@ -1,0 +1,137 @@
+name: 00 - Bootstrap Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      cloud_provider:
+        description: 'Cloud Provider'
+        required: true
+        type: choice
+        options:
+          - aws
+        default: aws
+      region:
+        description: 'AWS Region'
+        required: true
+        type: string
+        default: us-west-2
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - staging
+        default: dev
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  TENANT: gayathrikanchinadham
+
+jobs:
+  bootstrap:
+    name: Bootstrap Infrastructure
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Check for existing VPC
+        id: check-vpc
+        run: |
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Name,Values=opsera-vpc" \
+            --query 'Vpcs[0].VpcId' \
+            --output text)
+
+          if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
+            echo "vpc_exists=true" >> $GITHUB_OUTPUT
+            echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
+            echo "✓ Found existing VPC: $VPC_ID"
+          else
+            echo "vpc_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠ VPC not found - will create"
+          fi
+
+      - name: Create VPC (if needed)
+        if: steps.check-vpc.outputs.vpc_exists == 'false'
+        run: |
+          echo "Creating VPC: opsera-vpc"
+          VPC_ID=$(aws ec2 create-vpc \
+            --cidr-block 10.0.0.0/16 \
+            --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=opsera-vpc}]" \
+            --query 'Vpc.VpcId' \
+            --output text)
+
+          echo "✓ Created VPC: $VPC_ID"
+          echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
+
+      - name: Check for existing EKS cluster
+        id: check-eks
+        run: |
+          CLUSTER_NAME="${{ env.TENANT }}-usw2-np"
+
+          if aws eks describe-cluster --name $CLUSTER_NAME --region ${{ inputs.region }} 2>/dev/null; then
+            echo "cluster_exists=true" >> $GITHUB_OUTPUT
+            echo "✓ Found existing EKS cluster: $CLUSTER_NAME"
+          else
+            echo "cluster_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠ EKS cluster not found: $CLUSTER_NAME"
+          fi
+
+      - name: Check for existing ECR repository
+        id: check-ecr
+        run: |
+          REPO_NAME="${{ env.APP_NAME }}"
+
+          if aws ecr describe-repositories --repository-names $REPO_NAME --region ${{ inputs.region }} 2>/dev/null; then
+            REPO_URI=$(aws ecr describe-repositories --repository-names $REPO_NAME --region ${{ inputs.region }} --query 'repositories[0].repositoryUri' --output text)
+            echo "repo_exists=true" >> $GITHUB_OUTPUT
+            echo "repo_uri=$REPO_URI" >> $GITHUB_OUTPUT
+            echo "✓ Found existing ECR repository: $REPO_URI"
+          else
+            echo "repo_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠ ECR repository not found"
+          fi
+
+      - name: Create ECR repository (if needed)
+        if: steps.check-ecr.outputs.repo_exists == 'false'
+        run: |
+          REPO_NAME="${{ env.APP_NAME }}"
+
+          REPO_URI=$(aws ecr create-repository \
+            --repository-name $REPO_NAME \
+            --region ${{ inputs.region }} \
+            --image-scanning-configuration scanOnPush=true \
+            --encryption-configuration encryptionType=AES256 \
+            --query 'repository.repositoryUri' \
+            --output text)
+
+          echo "✓ Created ECR repository: $REPO_URI"
+          echo "repo_uri=$REPO_URI" >> $GITHUB_OUTPUT
+
+      - name: Bootstrap Summary
+        run: |
+          echo "## Infrastructure Bootstrap Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| VPC | ${{ steps.check-vpc.outputs.vpc_exists == 'true' && '✓ Existing' || '✓ Created' }} | ${{ steps.check-vpc.outputs.vpc_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| EKS Cluster | ${{ steps.check-eks.outputs.cluster_exists == 'true' && '✓ Existing' || '⚠ Manual setup required' }} | ${{ env.TENANT }}-usw2-np |" >> $GITHUB_STEP_SUMMARY
+          echo "| ECR Repository | ${{ steps.check-ecr.outputs.repo_exists == 'true' && '✓ Existing' || '✓ Created' }} | ${{ steps.check-ecr.outputs.repo_uri }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Run workflow: **20-ci-build-push** to build and push Docker image" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run workflow: **30-cd-deploy-dev** to deploy to DEV environment" >> $GITHUB_STEP_SUMMARY

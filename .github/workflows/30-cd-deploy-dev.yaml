@@ -1,0 +1,94 @@
+name: 30 - Deploy to DEV
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker Image Tag (7-char SHA or version)'
+        required: true
+        type: string
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  ENVIRONMENT: dev
+  AWS_REGION: us-west-2
+  TENANT: gayathrikanchinadham
+
+jobs:
+  deploy:
+    name: Deploy to DEV
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://${{ env.APP_NAME }}-dev.agents.opsera.dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update Kustomize image tag
+        run: |
+          cd .opsera-vite_react_shadcn_ts/k8s/overlays/dev
+
+          # Update kustomization.yaml with new image tag
+          cat > kustomization.yaml <<EOF
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+
+          namespace: ${{ env.APP_NAME }}-dev
+
+          resources:
+            - ../../base
+
+          images:
+            - name: APP_IMAGE
+              newName: ${{ steps.login-ecr.outputs.registry }}/${{ env.APP_NAME }}
+              newTag: ${{ inputs.image_tag }}
+
+          replicas:
+            - name: ${{ env.APP_NAME }}
+              count: 1
+          EOF
+
+          echo "✓ Updated image tag to: ${{ inputs.image_tag }}"
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .opsera-vite_react_shadcn_ts/k8s/overlays/dev/kustomization.yaml
+          git commit -m "Deploy ${{ env.APP_NAME }} to DEV: ${{ inputs.image_tag }}"
+          git push
+
+          echo "✓ Pushed changes to trigger ArgoCD sync"
+
+      - name: Wait for ArgoCD sync
+        run: |
+          echo "Waiting for ArgoCD to sync..."
+          sleep 30
+          echo "✓ ArgoCD sync should be in progress"
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment to DEV Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | DEV |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | \`${{ inputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://${{ env.APP_NAME }}-dev.agents.opsera.dev |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Monitor Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "Check ArgoCD UI for sync status" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: vite-react-shadcn-ts-dev
+
+resources:
+  - ../../base
+  - namespace.yaml
+
+images:
+  - name: APP_IMAGE
+    newName: REGISTRY_PLACEHOLDER/vite-react-shadcn-ts
+    newTag: latest
+
+replicas:
+  - name: vite-react-shadcn-ts
+    count: 1
+
+patches:
+  - target:
+      kind: Ingress
+      name: vite-react-shadcn-ts
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: vite-react-shadcn-ts-dev.agents.opsera.dev
+      - op: replace
+        path: /spec/rules/0/host
+        value: vite-react-shadcn-ts-dev.agents.opsera.dev
+
+commonLabels:
+  environment: dev
+  tenant: gayathrikanchinadham
