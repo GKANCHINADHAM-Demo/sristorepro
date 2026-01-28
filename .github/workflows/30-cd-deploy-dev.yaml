@@ -73,13 +73,40 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Fetch latest changes
+          git fetch origin main
+
+          # Reset to remote to avoid conflicts
+          git reset --hard origin/main
+
+          # Re-apply the image tag update to latest code
+          cd .opsera-vite_react_shadcn_ts/k8s/overlays/dev
+
+          cat > kustomization.yaml <<EOF
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+
+          namespace: ${{ env.APP_NAME }}-dev
+
+          resources:
+            - ../../base
+
+          images:
+            - name: APP_IMAGE
+              newName: ${{ steps.login-ecr.outputs.registry }}/${{ env.APP_NAME }}
+              newTag: ${{ inputs.image_tag }}
+
+          replicas:
+            - name: ${{ env.APP_NAME }}
+              count: 1
+          EOF
+
+          cd ../../../../
+
+          # Now commit and push
           git add .opsera-vite_react_shadcn_ts/k8s/overlays/dev/kustomization.yaml
           git commit -m "Deploy ${{ env.APP_NAME }} to DEV: ${{ inputs.image_tag }}"
-
-          # Pull and rebase before pushing to handle race conditions
-          git pull --rebase origin main || true
-
-          git push
+          git push origin main
 
           echo "✓ Pushed changes to trigger ArgoCD sync"
 
