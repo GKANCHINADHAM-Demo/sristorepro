@@ -1,0 +1,75 @@
+name: 99 - Recreate Ingress with ACM
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  recreate:
+    name: Recreate Ingress
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Delete existing ingress
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "🗑️ Deleting existing ingress to force recreation..."
+          kubectl delete ingress ${{ env.APP_NAME }} -n $APP_NS || echo "Ingress already deleted"
+
+          echo "⏳ Waiting 10 seconds..."
+          sleep 10
+
+      - name: Trigger ArgoCD sync
+        run: |
+          echo "✨ Triggering ArgoCD sync to recreate ingress..."
+          kubectl patch application ${{ env.APP_NAME }}-dev -n argocd \
+            --type merge \
+            -p '{"operation":{"initiatedBy":{"username":"admin"},"sync":{"revision":"HEAD"}}}'
+
+          echo "⏳ Waiting 30 seconds for sync..."
+          sleep 30
+
+      - name: Verify ingress recreated
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Ingress Status ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o wide
+
+          echo ""
+          echo "=== Ingress Annotations ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o jsonpath='{.metadata.annotations}' | jq '.'
+
+      - name: Wait for ALB update
+        run: |
+          echo "⏳ Waiting 60 seconds for ALB to provision with ACM certificate..."
+          sleep 60
+
+      - name: Test certificate
+        run: |
+          echo "=== Testing SSL Certificate ==="
+          echo | openssl s_client -connect vite-react-shadcn-ts-dev.agent.opsera.dev:443 -servername vite-react-shadcn-ts-dev.agent.opsera.dev 2>/dev/null | openssl x509 -noout -subject -issuer -dates
+
+      - name: Test HTTPS endpoint
+        run: |
+          echo "=== Testing HTTPS Endpoint ==="
+          curl -k -v https://vite-react-shadcn-ts-dev.agent.opsera.dev 2>&1 | head -30
