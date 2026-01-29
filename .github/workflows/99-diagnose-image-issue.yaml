@@ -1,0 +1,51 @@
+name: 99 - Diagnose Image Issue
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  diagnose:
+    name: Diagnose Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect to spoke cluster
+        run: |
+          aws eks update-kubeconfig --name opsera-usw2-np --region us-west-2
+
+      - name: Get deployment image spec
+        run: |
+          echo "=== Deployment Image Spec ==="
+          kubectl get deployment vite-react-shadcn-ts -n vite-react-shadcn-ts-dev -o jsonpath='{.spec.template.spec.containers[0].image}' && echo ""
+
+      - name: Get running pod image
+        run: |
+          echo "=== Running Pod Image ==="
+          kubectl get pods -n vite-react-shadcn-ts-dev -l app=vite-react-shadcn-ts -o jsonpath='{.items[*].spec.containers[0].image}' && echo ""
+
+      - name: Describe failed pod
+        run: |
+          echo "=== Failed Pod Details ==="
+          kubectl describe pod -n vite-react-shadcn-ts-dev vite-react-shadcn-ts-68b65c8f98-gxtll || echo "Pod not found"
+
+      - name: Check if image exists in ECR
+        run: |
+          echo "=== Checking ECR for image 6a5d5ae ==="
+          aws ecr describe-images --repository-name vite-react-shadcn-ts --image-ids imageTag=6a5d5ae --region us-west-2 || echo "Image not found in ECR"
+
+      - name: List recent images in ECR
+        run: |
+          echo "=== Recent ECR Images ==="
+          aws ecr describe-images --repository-name vite-react-shadcn-ts --region us-west-2 --query 'sort_by(imageDetails,& imagePushedAt)[-5:].[imageTags[0], imagePushedAt]' --output table
