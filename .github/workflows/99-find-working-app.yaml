@@ -1,0 +1,104 @@
+name: 99 - Find Working App Config
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  find:
+    name: Find Working App
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Find plan-and-joy namespace
+        run: |
+          echo "=== All namespaces matching plan-and-joy ==="
+          kubectl get namespaces | grep -i "plan.*joy\|joy.*plan" || echo "No matching namespaces"
+
+          echo ""
+          echo "=== All namespaces containing 'opsera' ==="
+          kubectl get namespaces | grep -i "opsera" || echo "No opsera namespaces"
+
+          echo ""
+          echo "=== Searching for plan-and-joy ingress in ALL namespaces ==="
+          kubectl get ingress -A | grep -i "plan.*joy\|joy.*plan" || echo "No plan-and-joy ingress found"
+
+          echo ""
+          echo "=== Searching for opsera-plan-and-joy ingress in ALL namespaces ==="
+          kubectl get ingress -A | grep -i "opsera.*plan\|plan.*opsera" || echo "No opsera-plan ingress found"
+
+      - name: Search all ingresses for working domain
+        run: |
+          echo "=== All ingresses with agent.opsera.dev ==="
+          kubectl get ingress -A -o yaml | grep -B 5 "agent.opsera.dev" | head -100
+
+      - name: Find by checking all ingresses
+        run: |
+          echo "=== Checking all ingresses with their hosts ==="
+          for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+            INGRESSES=$(kubectl get ingress -n $ns -o jsonpath='{range .items[*]}{.metadata.name}{"="}{.spec.rules[0].host}{"\n"}{end}' 2>/dev/null)
+            if [ -n "$INGRESSES" ]; then
+              echo "Namespace: $ns"
+              echo "$INGRESSES"
+              echo ""
+            fi
+          done
+
+      - name: Get complete working app config
+        run: |
+          echo "=== Finding namespace with opsera-plan-and-joy-dev.agent.opsera.dev ==="
+
+          FOUND_NS=""
+          FOUND_INGRESS=""
+
+          for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+            INGRESS=$(kubectl get ingress -n $ns -o json 2>/dev/null | jq -r '.items[] | select(.spec.rules[].host == "opsera-plan-and-joy-dev.agent.opsera.dev") | .metadata.name' 2>/dev/null)
+            if [ -n "$INGRESS" ]; then
+              FOUND_NS=$ns
+              FOUND_INGRESS=$INGRESS
+              break
+            fi
+          done
+
+          if [ -n "$FOUND_NS" ]; then
+            echo "Found in namespace: $FOUND_NS"
+            echo "Ingress name: $FOUND_INGRESS"
+            echo ""
+            echo "=== Complete Ingress Configuration ==="
+            kubectl get ingress $FOUND_INGRESS -n $FOUND_NS -o yaml
+
+            echo ""
+            echo "=== Service Configuration ==="
+            kubectl get svc -n $FOUND_NS
+
+            echo ""
+            echo "=== Pod Status ==="
+            kubectl get pods -n $FOUND_NS
+
+            echo ""
+            echo "=== TLS Secrets ==="
+            kubectl get secrets -n $FOUND_NS | grep tls || echo "No TLS secrets"
+          else
+            echo "Could not find opsera-plan-and-joy-dev ingress"
+            echo ""
+            echo "=== Listing all ingress hosts for debugging ==="
+            kubectl get ingress -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{" -> "}{.spec.rules[*].host}{"\n"}{end}'
+          fi
