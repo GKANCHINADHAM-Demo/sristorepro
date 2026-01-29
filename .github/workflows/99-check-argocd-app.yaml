@@ -1,0 +1,52 @@
+name: 99 - Check ArgoCD App Details
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  check:
+    name: Check App
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect to hub cluster
+        run: |
+          aws eks update-kubeconfig --name argocd-usw2 --region us-west-2
+
+      - name: Get full application details
+        run: |
+          echo "=== Full ArgoCD Application YAML ==="
+          kubectl get application vite-react-shadcn-ts-dev -n argocd -o yaml
+
+      - name: Check application destination
+        run: |
+          echo "=== Application Destination ==="
+          kubectl get application vite-react-shadcn-ts-dev -n argocd -o jsonpath='{.spec.destination}' | jq '.'
+
+      - name: Check for errors
+        run: |
+          echo "=== Conditions ==="
+          kubectl get application vite-react-shadcn-ts-dev -n argocd -o jsonpath='{.status.conditions}' | jq '.'
+
+      - name: Force refresh ArgoCD
+        run: |
+          echo "=== Forcing ArgoCD refresh ==="
+          kubectl annotate application vite-react-shadcn-ts-dev -n argocd argocd.argoproj.io/refresh=hard --overwrite
+
+          sleep 10
+
+          echo ""
+          echo "=== Status after refresh ==="
+          kubectl get application vite-react-shadcn-ts-dev -n argocd
