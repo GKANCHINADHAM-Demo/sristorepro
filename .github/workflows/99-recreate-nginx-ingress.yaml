@@ -1,0 +1,77 @@
+name: 99 - Recreate NGINX Ingress
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  recreate:
+    name: Recreate Ingress
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Delete existing ingress
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Deleting existing ingress ==="
+          kubectl delete ingress ${{ env.APP_NAME }} -n $APP_NS || echo "Ingress not found"
+
+          echo ""
+          echo "=== Waiting for deletion ==="
+          sleep 10
+
+      - name: Force ArgoCD sync
+        run: |
+          echo "=== Forcing ArgoCD sync ==="
+          kubectl patch application ${{ env.APP_NAME }}-dev -n argocd --type merge -p '{"operation":{"initiatedBy":{"automated":true},"sync":{"syncStrategy":{"hook":{}}}}}' || true
+
+          sleep 5
+
+          kubectl patch application ${{ env.APP_NAME }}-dev -n argocd --type merge -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}' || true
+
+      - name: Wait for new ingress
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Waiting for new ingress to be created ==="
+          for i in {1..30}; do
+            if kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS &>/dev/null; then
+              echo "Ingress found!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 10
+          done
+
+          echo ""
+          echo "=== New Ingress Configuration ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o yaml
+
+      - name: Test endpoint
+        run: |
+          echo "=== Testing endpoint ==="
+          sleep 30
+          curl -v https://vite-react-shadcn-ts-dev.agent.opsera.dev 2>&1 | head -30 || echo "Endpoint test failed"
+
+          echo ""
+          echo "=== Certificate check ==="
+          echo | openssl s_client -servername vite-react-shadcn-ts-dev.agent.opsera.dev -connect vite-react-shadcn-ts-dev.agent.opsera.dev:443 2>/dev/null | openssl x509 -noout -issuer -subject || echo "Certificate check failed"
