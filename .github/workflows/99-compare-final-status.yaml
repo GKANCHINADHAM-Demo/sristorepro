@@ -1,0 +1,66 @@
+name: 99 - Compare Final Status with Working App
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  compare:
+    name: Compare Status
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect to spoke cluster
+        run: |
+          aws eks update-kubeconfig --name opsera-usw2-np --region us-west-2
+
+      - name: Compare Pods Status
+        run: |
+          echo "=== Working App (plan-and-joy) Pods ==="
+          kubectl get pods -n plan-and-joy-dev
+          echo ""
+          echo "=== Our App (vite-react-shadcn-ts) Pods ==="
+          kubectl get pods -n vite-react-shadcn-ts-dev
+
+      - name: Compare Images
+        run: |
+          echo "=== Working App Image ==="
+          kubectl get deployment plan-and-joy -n plan-and-joy-dev -o jsonpath='{.spec.template.spec.containers[0].image}' && echo ""
+          echo ""
+          echo "=== Our App Image ==="
+          kubectl get deployment vite-react-shadcn-ts -n vite-react-shadcn-ts-dev -o jsonpath='{.spec.template.spec.containers[0].image}' && echo ""
+
+      - name: Compare Ingress Configuration
+        run: |
+          echo "=== Working App Ingress ==="
+          kubectl get ingress plan-and-joy -n plan-and-joy-dev -o yaml | grep -A 15 "annotations:\|spec:"
+          echo ""
+          echo "=== Our App Ingress ==="
+          kubectl get ingress vite-react-shadcn-ts -n vite-react-shadcn-ts-dev -o yaml | grep -A 15 "annotations:\|spec:"
+
+      - name: Test Both Endpoints
+        run: |
+          echo "=== Testing Working App ==="
+          curl -I https://opsera-plan-and-joy-dev.agent.opsera.dev 2>&1 | head -5
+          echo ""
+          echo "=== Testing Our App ==="
+          curl -I https://vite-react-shadcn-ts-dev.agent.opsera.dev 2>&1 | head -5
+
+      - name: Compare Certificates
+        run: |
+          echo "=== Working App Certificate ==="
+          echo | openssl s_client -servername opsera-plan-and-joy-dev.agent.opsera.dev -connect opsera-plan-and-joy-dev.agent.opsera.dev:443 2>/dev/null | openssl x509 -noout -issuer -subject -dates
+          echo ""
+          echo "=== Our App Certificate ==="
+          echo | openssl s_client -servername vite-react-shadcn-ts-dev.agent.opsera.dev -connect vite-react-shadcn-ts-dev.agent.opsera.dev:443 2>/dev/null | openssl x509 -noout -issuer -subject -dates
