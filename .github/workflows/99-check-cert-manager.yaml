@@ -1,0 +1,101 @@
+name: 99 - Check cert-manager Status
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  check:
+    name: Check cert-manager
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Check ingress annotations
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Ingress Annotations ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o jsonpath='{.metadata.annotations}' | jq '.'
+
+      - name: Check Certificate resource
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Certificate Resources ==="
+          kubectl get certificate -n $APP_NS
+
+          echo ""
+          echo "=== Certificate Details ==="
+          kubectl describe certificate -n $APP_NS
+
+      - name: Check CertificateRequest
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== CertificateRequest ==="
+          kubectl get certificaterequest -n $APP_NS
+
+          echo ""
+          echo "=== CertificateRequest Details ==="
+          kubectl describe certificaterequest -n $APP_NS | tail -50
+
+      - name: Check ACME Order
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== ACME Orders ==="
+          kubectl get order -n $APP_NS
+
+          echo ""
+          echo "=== Order Details ==="
+          kubectl describe order -n $APP_NS | tail -50
+
+      - name: Check ACME Challenge
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== ACME Challenges ==="
+          kubectl get challenge -n $APP_NS
+
+          echo ""
+          echo "=== Challenge Details ==="
+          kubectl describe challenge -n $APP_NS | tail -50
+
+      - name: Check TLS Secret
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== TLS Secrets ==="
+          kubectl get secret -n $APP_NS | grep tls
+
+          echo ""
+          echo "=== Secret Details ==="
+          kubectl describe secret vite-react-shadcn-ts-tls -n $APP_NS || echo "Secret not created yet"
+
+      - name: Check cert-manager logs
+        run: |
+          echo "=== cert-manager logs (last 50 lines) ==="
+          kubectl logs -n cert-manager -l app=cert-manager --tail=50 || echo "Could not find cert-manager logs"
+
+      - name: Test endpoint
+        run: |
+          echo "=== Testing HTTPS Endpoint ==="
+          curl -k -I https://vite-react-shadcn-ts-dev.agent.opsera.dev 2>&1 | head -10
