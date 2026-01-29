@@ -1,0 +1,43 @@
+name: 99 - Get Spoke Cluster URL
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  get:
+    name: Get Cluster URL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect to ArgoCD hub cluster
+        run: |
+          aws eks update-kubeconfig --name argocd-usw2 --region us-west-2
+          kubectl cluster-info
+
+      - name: List registered clusters in ArgoCD
+        run: |
+          echo "=== Clusters registered in ArgoCD ==="
+          kubectl get secret -n argocd -l argocd.argoproj.io/secret-type=cluster -o yaml
+
+      - name: Get opsera-usw2-np cluster details
+        run: |
+          echo "=== Finding opsera-usw2-np cluster secret ==="
+          kubectl get secret -n argocd -l argocd.argoproj.io/secret-type=cluster -o json | \
+            jq -r '.items[] | select(.metadata.name | contains("opsera-usw2-np")) | {name: .metadata.name, server: (.data.server | @base64d), name_label: (.data.name | @base64d)}'
+
+      - name: Get actual EKS endpoint
+        run: |
+          echo "=== opsera-usw2-np EKS endpoint ==="
+          aws eks describe-cluster --name opsera-usw2-np --region us-west-2 --query 'cluster.endpoint' --output text
