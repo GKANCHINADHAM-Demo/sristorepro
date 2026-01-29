@@ -1,0 +1,55 @@
+name: 99 - Restart Pods
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  restart:
+    name: Restart Pods
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect to spoke cluster
+        run: |
+          aws eks update-kubeconfig --name opsera-usw2-np --region us-west-2
+
+      - name: Check current image
+        run: |
+          echo "=== Current Deployment Image ==="
+          kubectl get deployment vite-react-shadcn-ts -n vite-react-shadcn-ts-dev -o jsonpath='{.spec.template.spec.containers[0].image}' && echo ""
+
+      - name: Restart deployment
+        run: |
+          echo "=== Restarting deployment ==="
+          kubectl rollout restart deployment vite-react-shadcn-ts -n vite-react-shadcn-ts-dev
+
+      - name: Wait for rollout
+        run: |
+          echo "=== Waiting for rollout to complete ==="
+          kubectl rollout status deployment vite-react-shadcn-ts -n vite-react-shadcn-ts-dev --timeout=2m
+
+      - name: Check new pods
+        run: |
+          echo "=== New Pods ==="
+          kubectl get pods -n vite-react-shadcn-ts-dev
+          echo ""
+          echo "=== Pod Image ==="
+          kubectl get pods -n vite-react-shadcn-ts-dev -o jsonpath='{.items[0].spec.containers[0].image}' && echo ""
+
+      - name: Test endpoint
+        run: |
+          echo "=== Testing endpoint (wait 10s for ingress) ==="
+          sleep 10
+          curl -I "https://vite-react-shadcn-ts-dev.agent.opsera.dev/" 2>&1 | head -10
