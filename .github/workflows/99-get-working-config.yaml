@@ -1,0 +1,48 @@
+name: 99 - Get Working App Config
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  get:
+    name: Get Config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect to opsera-usw2-np cluster
+        run: |
+          echo "Connecting to opsera-usw2-np (correct cluster)"
+          aws eks update-kubeconfig --name opsera-usw2-np --region us-west-2
+
+      - name: Get working app ingress
+        run: |
+          echo "=== Working App Ingress Configuration ==="
+          kubectl get ingress plan-and-joy -n plan-and-joy-dev -o yaml
+
+      - name: Get working app service
+        run: |
+          echo "=== Working App Service Configuration ==="
+          kubectl get svc -n plan-and-joy-dev -o yaml
+
+      - name: Get working app deployment
+        run: |
+          echo "=== Working App Deployment Configuration ==="
+          kubectl get deployment -n plan-and-joy-dev -o yaml
+
+      - name: Check ArgoCD
+        run: |
+          echo "=== Check if ArgoCD manages this app ==="
+          kubectl get application -n argocd | grep plan-and-joy || echo "No ArgoCD application found"
