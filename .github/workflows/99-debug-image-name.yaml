@@ -1,0 +1,53 @@
+name: 99 - Debug Image Name
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  debug:
+    name: Debug Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect to spoke cluster
+        run: |
+          aws eks update-kubeconfig --name opsera-usw2-np --region us-west-2
+
+      - name: Get actual image from deployment
+        run: |
+          echo "=== Image from Deployment Spec ==="
+          kubectl get deployment vite-react-shadcn-ts -n vite-react-shadcn-ts-dev -o jsonpath='{.spec.template.spec.containers[0].image}' && echo ""
+
+      - name: Describe pod to see exact error
+        run: |
+          echo "=== Pod Error Details ==="
+          POD_NAME=$(kubectl get pods -n vite-react-shadcn-ts-dev -o jsonpath='{.items[0].metadata.name}')
+          kubectl describe pod $POD_NAME -n vite-react-shadcn-ts-dev | grep -A 5 "InvalidImageName"
+
+      - name: Check ArgoCD app sync status
+        run: |
+          echo "=== ArgoCD Application Sync Status ==="
+          aws eks update-kubeconfig --name argocd-usw2 --region us-west-2
+          kubectl get application vite-react-shadcn-ts-dev -n argocd -o jsonpath='{.status.sync.status}' && echo ""
+          echo ""
+          echo "=== Last Deployed Revision ==="
+          kubectl get application vite-react-shadcn-ts-dev -n argocd -o jsonpath='{.status.sync.revision}' && echo ""
+
+      - name: Force ArgoCD refresh
+        run: |
+          echo "=== Forcing ArgoCD to refresh and sync ==="
+          kubectl annotate application vite-react-shadcn-ts-dev -n argocd argocd.argoproj.io/refresh=hard --overwrite
+          sleep 5
+          kubectl get application vite-react-shadcn-ts-dev -n argocd
