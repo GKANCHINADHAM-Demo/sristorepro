@@ -1,0 +1,68 @@
+name: 99 - Check NGINX Ingress Controller
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  check:
+    name: Check NGINX Ingress
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Check NGINX Ingress Controller
+        run: |
+          echo "=== NGINX Ingress Controller Pods ==="
+          kubectl get pods -A | grep -i "nginx.*ingress\|ingress.*nginx" || echo "No NGINX ingress pods found"
+
+          echo ""
+          echo "=== NGINX Ingress Controller Services ==="
+          kubectl get svc -A | grep -i "nginx.*ingress\|ingress.*nginx" || echo "No NGINX ingress services found"
+
+          echo ""
+          echo "=== IngressClasses Available ==="
+          kubectl get ingressclass
+
+          echo ""
+          echo "=== Check if nginx IngressClass exists ==="
+          kubectl get ingressclass nginx -o yaml || echo "nginx IngressClass not found"
+
+      - name: Check working app ingress
+        run: |
+          echo "=== ecomm-1-dev Ingress Details ==="
+          kubectl get ingress ecomm-1-ingress -n ecomm-1-dev -o yaml
+
+          echo ""
+          echo "=== ecomm-1-dev Certificate Secret ==="
+          kubectl get secret ecomm-1-dev-tls -n ecomm-1-dev -o yaml || echo "Secret not found"
+
+      - name: Test DNS resolution
+        run: |
+          echo "=== DNS for our app ==="
+          nslookup vite-react-shadcn-ts-dev.agent.opsera.dev || echo "DNS lookup failed"
+
+          echo ""
+          echo "=== DNS for working app ==="
+          nslookup ecomm-1-dev.agent.opsera.dev || echo "DNS lookup failed"
+
+          echo ""
+          echo "=== DNS for friend's app ==="
+          nslookup opsera-plan-and-joy-dev.agent.opsera.dev || echo "DNS lookup failed"
