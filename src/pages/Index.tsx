@@ -34,15 +34,15 @@ export default function Index() {
   return (
     <Layout>
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-primary">
+      <section className="relative overflow-hidden bg-gradient-to-br from-background via-accent/5 to-accent/10">
         <div className="page-container py-24 lg:py-32">
           <div className="max-w-2xl">
-            <h1 className="text-4xl font-bold tracking-tight text-primary-foreground sm:text-5xl lg:text-6xl">
+            <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl">
               Enterprise E-commerce,{' '}
               <span className="text-accent">Simplified</span>
             </h1>
-            <p className="mt-6 text-lg text-primary-foreground/80">
-              A production-ready, scalable platform built for growth. 
+            <p className="mt-6 text-lg text-muted-foreground">
+              A production-ready, scalable platform built for growth.
               Modern architecture, seamless UX, and enterprise-grade security.
             </p>
             <div className="mt-10 flex flex-wrap gap-4">
@@ -56,16 +56,16 @@ export default function Index() {
                 <Link to="/login">Sign In</Link>
               </Button>
             </div>
-            <div className="mt-8 p-4 bg-primary-foreground/10 rounded-lg inline-block">
-              <p className="text-sm text-primary-foreground/80">
-                <strong className="text-primary-foreground">Demo Credentials:</strong><br />
+            <div className="mt-8 p-4 bg-card border rounded-lg inline-block">
+              <p className="text-sm text-muted-foreground">
+                <strong className="text-foreground">Demo Credentials:</strong><br />
                 Admin: admin@store.com / admin123<br />
                 Customer: user@example.com / user123
               </p>
             </div>
           </div>
         </div>
-        <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-accent/20 to-transparent hidden lg:block" />
+        <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-accent/15 to-transparent hidden lg:block" />
       </section>
 
       {/* Features */}
@@ -133,12 +133,12 @@ export default function Index() {
       </section>
 
       {/* CTA Section */}
-      <section className="py-24 bg-primary">
+      <section className="py-24 bg-gradient-to-br from-accent/10 via-accent/5 to-background">
         <div className="page-container text-center">
-          <h2 className="text-3xl font-bold text-primary-foreground sm:text-4xl">
+          <h2 className="text-3xl font-bold text-foreground sm:text-4xl">
             Ready to Get Started?
           </h2>
-          <p className="mt-4 text-lg text-primary-foreground/80 max-w-2xl mx-auto">
+          <p className="mt-4 text-lg text-muted-foreground max-w-2xl mx-auto">
             Join thousands of businesses using StorePro to power their e-commerce operations.
           </p>
           <div className="mt-8 flex justify-center gap-4">
