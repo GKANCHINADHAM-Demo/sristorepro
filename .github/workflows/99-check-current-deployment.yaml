@@ -1,0 +1,46 @@
+name: 99 - Check Current Deployment
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  check:
+    name: Check Deployment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect to spoke cluster
+        run: |
+          aws eks update-kubeconfig --name opsera-usw2-np --region us-west-2
+
+      - name: Check current pods
+        run: |
+          echo "=== Current Pods ==="
+          kubectl get pods -n vite-react-shadcn-ts-dev
+
+      - name: Check current image
+        run: |
+          echo "=== Current Deployment Image ==="
+          kubectl get deployment vite-react-shadcn-ts -n vite-react-shadcn-ts-dev -o jsonpath='{.spec.template.spec.containers[0].image}' && echo ""
+
+      - name: Check pod image
+        run: |
+          echo "=== Pod Image (actual running) ==="
+          kubectl get pods -n vite-react-shadcn-ts-dev -o jsonpath='{.items[0].spec.containers[0].image}' && echo ""
+
+      - name: Force browser cache clear test
+        run: |
+          echo "=== Testing endpoint with cache-busting ==="
+          curl -I "https://vite-react-shadcn-ts-dev.agent.opsera.dev/?nocache=$(date +%s)" 2>&1 | head -10
