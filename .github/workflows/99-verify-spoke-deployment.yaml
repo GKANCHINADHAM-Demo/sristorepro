@@ -1,0 +1,85 @@
+name: 99 - Verify Spoke Deployment
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  verify:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check ArgoCD status (Hub cluster)
+        run: |
+          echo "=== Connecting to Hub cluster (argocd-usw2) ==="
+          aws eks update-kubeconfig --name argocd-usw2 --region us-west-2
+
+          echo ""
+          echo "=== ArgoCD Application Status ==="
+          kubectl get application vite-react-shadcn-ts-dev -n argocd
+
+          echo ""
+          echo "=== ArgoCD Sync Status ==="
+          kubectl get application vite-react-shadcn-ts-dev -n argocd -o jsonpath='{.status.sync.status}' && echo ""
+
+          echo ""
+          echo "=== ArgoCD Health Status ==="
+          kubectl get application vite-react-shadcn-ts-dev -n argocd -o jsonpath='{.status.health.status}' && echo ""
+
+      - name: Check deployment in Spoke cluster
+        run: |
+          echo "=== Connecting to Spoke cluster (opsera-usw2-np) ==="
+          aws eks update-kubeconfig --name opsera-usw2-np --region us-west-2 --alias spoke
+
+          echo ""
+          echo "=== Namespace ==="
+          kubectl get namespace vite-react-shadcn-ts-dev || echo "Namespace not found yet"
+
+          echo ""
+          echo "=== Pods ==="
+          kubectl get pods -n vite-react-shadcn-ts-dev || echo "No pods yet"
+
+          echo ""
+          echo "=== Service ==="
+          kubectl get svc -n vite-react-shadcn-ts-dev || echo "No service yet"
+
+          echo ""
+          echo "=== Ingress ==="
+          kubectl get ingress -n vite-react-shadcn-ts-dev || echo "No ingress yet"
+
+      - name: Wait and check ingress details
+        run: |
+          echo "Waiting 30 seconds for resources to be created..."
+          sleep 30
+
+          aws eks update-kubeconfig --name opsera-usw2-np --region us-west-2 --alias spoke
+
+          echo ""
+          echo "=== Ingress Details ==="
+          kubectl get ingress vite-react-shadcn-ts -n vite-react-shadcn-ts-dev -o yaml || echo "Ingress not ready"
+
+      - name: Test HTTPS endpoint
+        run: |
+          echo "Waiting 60 more seconds for ingress to be ready..."
+          sleep 60
+
+          echo ""
+          echo "=== Testing HTTPS Endpoint ==="
+          curl -I https://vite-react-shadcn-ts-dev.agent.opsera.dev 2>&1 | head -15
+
+          echo ""
+          echo "=== Certificate Check ==="
+          echo | openssl s_client -servername vite-react-shadcn-ts-dev.agent.opsera.dev -connect vite-react-shadcn-ts-dev.agent.opsera.dev:443 2>/dev/null | openssl x509 -noout -issuer -subject -dates || echo "Certificate check failed"
