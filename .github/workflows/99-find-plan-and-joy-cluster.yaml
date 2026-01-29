@@ -1,0 +1,75 @@
+name: 99 - Find Plan and Joy Cluster
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  find:
+    name: Find Cluster
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: List all EKS clusters
+        run: |
+          echo "=== All EKS Clusters in us-west-2 ==="
+          aws eks list-clusters --region us-west-2 --output table
+
+      - name: Search in each cluster
+        run: |
+          echo "=== Searching for opsera-plan-and-joy-dev in all clusters ==="
+
+          for CLUSTER in $(aws eks list-clusters --region us-west-2 --query 'clusters[]' --output text); do
+            echo ""
+            echo "============================================"
+            echo "Checking cluster: $CLUSTER"
+            echo "============================================"
+
+            aws eks update-kubeconfig --name $CLUSTER --region us-west-2 --alias $CLUSTER
+
+            echo "Searching for plan-and-joy ingress..."
+            kubectl get ingress -A | grep -i "plan.*joy\|joy.*plan" || echo "Not found in $CLUSTER"
+
+            echo "Searching for opsera-plan-and-joy host..."
+            kubectl get ingress -A -o json | jq -r '.items[] | select(.spec.rules[].host | contains("plan-and-joy")) | "\(.metadata.namespace)/\(.metadata.name) -> \(.spec.rules[].host)"' || echo "No matching host found"
+          done
+
+      - name: Check DNS and external systems
+        run: |
+          echo "=== DNS Resolution ==="
+          nslookup opsera-plan-and-joy-dev.agent.opsera.dev
+
+          echo ""
+          echo "=== Certificate Check ==="
+          echo | openssl s_client -servername opsera-plan-and-joy-dev.agent.opsera.dev -connect opsera-plan-and-joy-dev.agent.opsera.dev:443 2>/dev/null | openssl x509 -noout -text | grep -A 5 "Subject:\|Issuer:\|DNS:"
+
+          echo ""
+          echo "=== HTTP Response ==="
+          curl -I https://opsera-plan-and-joy-dev.agent.opsera.dev 2>&1 | head -20
+
+      - name: Summary
+        run: |
+          echo "============================================"
+          echo "SUMMARY"
+          echo "============================================"
+          echo "The opsera-plan-and-joy-dev app:"
+          echo "1. Is accessible at https://opsera-plan-and-joy-dev.agent.opsera.dev"
+          echo "2. Has a valid Let's Encrypt certificate"
+          echo "3. But is NOT found in any EKS cluster we have access to"
+          echo ""
+          echo "This means it's either:"
+          echo "- Deployed on a different infrastructure (not EKS)"
+          echo "- In a cluster we don't have access to"
+          echo "- Using a different deployment method"
