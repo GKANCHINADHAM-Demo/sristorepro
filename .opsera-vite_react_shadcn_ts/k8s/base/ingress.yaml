@@ -5,18 +5,12 @@ metadata:
   labels:
     app: vite-react-shadcn-ts
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    kubernetes.io/tls-acme: "true"
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:792373136340:certificate/9ca6cec7-6725-45a5-9d2b-19287925070e
 spec:
   ingressClassName: alb
-  tls:
-    - hosts:
-        - HOSTNAME_PLACEHOLDER
-      secretName: vite-react-shadcn-ts-tls
   rules:
     - host: HOSTNAME_PLACEHOLDER
       http:
