@@ -1,0 +1,72 @@
+name: 99 - Test NGINX Ingress
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  test:
+    name: Test NGINX Ingress
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Check new ingress configuration
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Ingress Details ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o yaml
+
+          echo ""
+          echo "=== Ingress Status ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS
+
+      - name: Check old ALB resources
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Check for old ALB ==="
+          kubectl get ingress -n $APP_NS -o jsonpath='{.items[*].status.loadBalancer.ingress[*].hostname}' || echo "No ALB found"
+
+      - name: Check TLS secret
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== TLS Secret Status ==="
+          kubectl get secret ${{ env.APP_NAME }}-tls -n $APP_NS || echo "TLS secret not created yet"
+
+          echo ""
+          echo "=== All secrets in namespace ==="
+          kubectl get secrets -n $APP_NS
+
+      - name: Test HTTPS endpoint
+        run: |
+          echo "=== Testing HTTPS Endpoint ==="
+          curl -v https://vite-react-shadcn-ts-dev.agent.opsera.dev 2>&1 | head -50
+
+          echo ""
+          echo "=== Certificate Details ==="
+          echo | openssl s_client -servername vite-react-shadcn-ts-dev.agent.opsera.dev -connect vite-react-shadcn-ts-dev.agent.opsera.dev:443 2>/dev/null | openssl x509 -noout -text | grep -A 2 "Issuer\|Subject\|Not"
+
+      - name: Check ArgoCD sync status
+        run: |
+          echo "=== ArgoCD Application Status ==="
+          kubectl get application ${{ env.APP_NAME }}-dev -n argocd -o yaml | grep -A 10 "status:"
