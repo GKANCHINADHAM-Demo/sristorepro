@@ -57,12 +57,16 @@ jobs:
             kubectl get ingress -n $FRIEND_NS -o yaml
 
             echo ""
-            echo "=== Friend's Certificates ==="
-            kubectl get certificate -n $FRIEND_NS 2>&1 || echo "No certificates"
+            echo "=== Friend's Ingress Annotations ==="
+            kubectl get ingress -n $FRIEND_NS -o jsonpath='{.items[*].metadata.annotations}' | jq '.'
 
             echo ""
             echo "=== Friend's TLS Secrets ==="
-            kubectl get secret -n $FRIEND_NS | grep tls
+            kubectl get secret -n $FRIEND_NS | grep tls || echo "No TLS secrets found"
+
+            echo ""
+            echo "=== Friend's Services ==="
+            kubectl get service -n $FRIEND_NS
           else
             echo "Could not find friend's namespace"
           fi
@@ -82,8 +86,16 @@ jobs:
           kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
 
           echo ""
-          echo "=== AWS LB Controller Logs (last 100 lines) ==="
-          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=100 | grep -i "vite-react-shadcn-ts\|certificate\|tls\|error"
+          echo "=== AWS LB Controller Full Logs (last 200 lines) ==="
+          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=200
+
+          echo ""
+          echo "=== Filtered: Certificate and TLS Related ==="
+          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=200 | grep -i "certificate\|tls\|ssl\|acm" || echo "No certificate-related logs"
+
+          echo ""
+          echo "=== Filtered: Our App Specific ==="
+          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=200 | grep -i "vite-react-shadcn-ts" || echo "No logs for our app"
 
       - name: Check our ingress current state
         run: |
@@ -96,6 +108,36 @@ jobs:
           echo "=== Our Ingress Events ==="
           kubectl get events -n $APP_NS --field-selector involvedObject.kind=Ingress --sort-by='.lastTimestamp' | tail -20
 
+      - name: Check actual ALB configuration in AWS
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Getting ALB ARN from Ingress ==="
+          ALB_ADDRESS=$(kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "ALB Address: $ALB_ADDRESS"
+
+          if [ -n "$ALB_ADDRESS" ]; then
+            echo ""
+            echo "=== Finding ALB in AWS ==="
+            ALB_ARN=$(aws elbv2 describe-load-balancers --region ${{ env.AWS_REGION }} --query "LoadBalancers[?DNSName=='$ALB_ADDRESS'].LoadBalancerArn" --output text)
+            echo "ALB ARN: $ALB_ARN"
+
+            if [ -n "$ALB_ARN" ]; then
+              echo ""
+              echo "=== ALB Listeners ==="
+              aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --region ${{ env.AWS_REGION }}
+
+              echo ""
+              echo "=== HTTPS Listener Certificates ==="
+              LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --region ${{ env.AWS_REGION }} --query 'Listeners[?Protocol==`HTTPS`].ListenerArn' --output text)
+              if [ -n "$LISTENER_ARN" ]; then
+                aws elbv2 describe-listener-certificates --listener-arn $LISTENER_ARN --region ${{ env.AWS_REGION }}
+              else
+                echo "No HTTPS listener found"
+              fi
+            fi
+          fi
+
       - name: Test both endpoints
         run: |
           echo "=== Testing Friend's App (working) ==="
@@ -104,3 +146,11 @@ jobs:
           echo ""
           echo "=== Testing Our App ==="
           curl -I -k https://vite-react-shadcn-ts-dev.agent.opsera.dev 2>&1 | head -15
+
+          echo ""
+          echo "=== Certificate Details for Friend's App ==="
+          echo | openssl s_client -servername opsera-plan-and-joy-dev.agent.opsera.dev -connect opsera-plan-and-joy-dev.agent.opsera.dev:443 2>/dev/null | openssl x509 -noout -text | grep -A 2 "Issuer\|Subject\|Not"
+
+          echo ""
+          echo "=== Certificate Details for Our App ==="
+          echo | openssl s_client -servername vite-react-shadcn-ts-dev.agent.opsera.dev -connect vite-react-shadcn-ts-dev.agent.opsera.dev:443 2>/dev/null | openssl x509 -noout -text | grep -A 2 "Issuer\|Subject\|Not"
