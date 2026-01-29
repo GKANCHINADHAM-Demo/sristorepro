@@ -18,7 +18,7 @@ spec:
     path: .opsera-vite_react_shadcn_ts/k8s/overlays/dev
 
   destination:
-    server: https://kubernetes.default.svc
+    server: https://A3D4B9F06FD499E4752FF4485264AA49.gr7.us-west-2.eks.amazonaws.com
     namespace: vite-react-shadcn-ts-dev
 
   syncPolicy:
