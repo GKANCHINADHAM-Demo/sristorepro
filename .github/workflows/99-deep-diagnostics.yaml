@@ -1,0 +1,106 @@
+name: 99 - Deep Diagnostics and Fix
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: vite-react-shadcn-ts
+  AWS_REGION: us-west-2
+
+jobs:
+  diagnose:
+    name: Deep Diagnostics
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          ALL_CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[]' --output text)
+          HUB_CLUSTER=$(echo "$ALL_CLUSTERS" | tr '\t' '\n' | grep -i "argocd" | head -1)
+          aws eks update-kubeconfig --name $HUB_CLUSTER --region ${{ env.AWS_REGION }}
+
+      - name: Check cert-manager installation cluster-wide
+        run: |
+          echo "=== cert-manager namespace ==="
+          kubectl get namespace cert-manager 2>&1 || echo "No cert-manager namespace"
+
+          echo ""
+          echo "=== cert-manager CRDs ==="
+          kubectl get crd | grep cert-manager 2>&1 || echo "No cert-manager CRDs"
+
+          echo ""
+          echo "=== cert-manager deployments in all namespaces ==="
+          kubectl get deployment -A | grep cert-manager 2>&1 || echo "No cert-manager deployments"
+
+          echo ""
+          echo "=== ClusterIssuers ==="
+          kubectl get clusterissuer 2>&1 || echo "No ClusterIssuer CRD"
+
+      - name: Check friend's app namespace
+        run: |
+          echo "=== Checking opsera-plan-and-joy namespace ==="
+          FRIEND_NS=$(kubectl get namespace | grep "plan-and-joy\|planjoy\|plan_and_joy" | awk '{print $1}' | head -1)
+
+          if [ -n "$FRIEND_NS" ]; then
+            echo "Found namespace: $FRIEND_NS"
+            echo ""
+            echo "=== Friend's Ingress ==="
+            kubectl get ingress -n $FRIEND_NS -o yaml
+
+            echo ""
+            echo "=== Friend's Certificates ==="
+            kubectl get certificate -n $FRIEND_NS 2>&1 || echo "No certificates"
+
+            echo ""
+            echo "=== Friend's TLS Secrets ==="
+            kubectl get secret -n $FRIEND_NS | grep tls
+          else
+            echo "Could not find friend's namespace"
+          fi
+
+      - name: Check all ingresses in cluster
+        run: |
+          echo "=== All Ingresses in Cluster ==="
+          kubectl get ingress -A
+
+          echo ""
+          echo "=== Ingresses using Let's Encrypt ==="
+          kubectl get ingress -A -o yaml | grep -A 5 "letsencrypt\|cert-manager"
+
+      - name: Check AWS Load Balancer Controller detailed logs
+        run: |
+          echo "=== AWS LB Controller Pods ==="
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+
+          echo ""
+          echo "=== AWS LB Controller Logs (last 100 lines) ==="
+          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=100 | grep -i "vite-react-shadcn-ts\|certificate\|tls\|error"
+
+      - name: Check our ingress current state
+        run: |
+          APP_NS="${{ env.APP_NAME }}-dev"
+
+          echo "=== Our Ingress ==="
+          kubectl get ingress ${{ env.APP_NAME }} -n $APP_NS -o yaml
+
+          echo ""
+          echo "=== Our Ingress Events ==="
+          kubectl get events -n $APP_NS --field-selector involvedObject.kind=Ingress --sort-by='.lastTimestamp' | tail -20
+
+      - name: Test both endpoints
+        run: |
+          echo "=== Testing Friend's App (working) ==="
+          curl -I https://opsera-plan-and-joy-dev.agent.opsera.dev 2>&1 | head -15
+
+          echo ""
+          echo "=== Testing Our App ==="
+          curl -I -k https://vite-react-shadcn-ts-dev.agent.opsera.dev 2>&1 | head -15
